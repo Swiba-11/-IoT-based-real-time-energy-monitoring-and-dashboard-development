@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart Plug Historical Data</title>
+    <link rel="icon" href="{{ url_for('static', filename='icon.png') }}?v=2">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2a9d8f; /* green */
+            --primary-dark: #21867a;
+            --accent: #52b69a;
+            --danger: #f72585;
+            --dark: #1a1a1a;
+            --light: #ffffff;
+            --glass-bg: rgba(255,255,255,0.45);
+            --glass-border: rgba(255,255,255,0.25);
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #eafaf1 0%, #d4f7e6 100%);
+            margin: 0;
+            padding: 30px;
+            min-height: 100vh;
+        }
+
+        .history-container {
+            max-width: 1200px;
+            margin: auto;
+            background: var(--glass-bg);
+            border-radius: 22px;
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(20px);
+            box-shadow: 0 18px 40px rgba(0,0,0,0.1);
+            padding: 25px;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .history-header h1 {
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-dark);
+        }
+
+        .btn-back {
+            background: var(--light);
+            color: var(--primary-dark);
+            border: 2px solid var(--primary-dark);
+            border-radius: 10px;
+            font-weight: 600;
+            padding: 8px 16px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: 0.3s ease;
+        }
+
+        .btn-back:hover {
+            background: var(--primary-dark);
+            color: var(--light);
+            transform: translateY(-2px);
+        }
+
+        .date-selector {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin: 20px 0;
+        }
+
+        select, .load-charts-btn {
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        select { min-width: 240px; }
+
+        .load-charts-btn {
+            background: var(--primary);
+            color: var(--light);
+            transition: all 0.25s ease;
+        }
+
+        .load-charts-btn:hover { background: var(--primary-dark); }
+
+        .stats-card {
+            background: var(--primary);
+            color: var(--light);
+            padding: 16px;
+            border-radius: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+            font-weight: 600;
+            font-size: 1.05rem;
+        }
+
+        .chart-grid {
+            display: grid;
+            gap: 18px;
+            margin-top: 18px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .chart-card {
+            background: var(--glass-bg);
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.06);
+            height: 320px;
+        }
+
+        .chart-title {
+            font-size: 1rem;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 50px;
+            color: #7f8c8d;
+            font-size: 1.2rem;
+        }
+
+        @media (max-width: 768px) { body { padding: 18px; } }
+    </style>
+</head>
+<body>
+    <div class="history-container">
+        <div class="history-header">
+            <h1>Historical Data</h1>
+            <a href="{{ url_for('historical_data_page') }}" class="btn-back">Refresh / View</a>
+        </div>
+
+        {% if not dates %}
+            <div class="no-data">No historical data available</div>
+        {% else %}
+            <div class="date-selector">
+                <select id="date-select" aria-label="Choose date">
+                    {% for date in dates %}
+                        <option value="{{ date }}">{{ date }}</option>
+                    {% endfor %}
+                </select>
+                <button id="load-charts" class="load-charts-btn">Load Charts</button>
+            </div>
+
+            <div id="stats-section" style="display:none;">
+                <div class="stats-card">
+                    <div>Total Energy Consumption</div>
+                    <div><span id="total-kwh">0</span> kWh</div>
+                </div>
+            </div>
+
+            <div id="charts-section" class="chart-grid" style="display:none;">
+                <div class="chart-card">
+                    <div class="chart-title">Power (W)</div>
+                    <canvas id="powerChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Voltage (V)</div>
+                    <canvas id="voltageChart"></canvas>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">Current (A)</div>
+                    <canvas id="currentChart"></canvas>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dateSelect = document.getElementById('date-select');
+            const loadBtn = document.getElementById('load-charts');
+            const statsSection = document.getElementById('stats-section');
+            const chartsSection = document.getElementById('charts-section');
+
+            let powerChart, voltageChart, currentChart;
+
+            // function to fetch & render for a date
+            function loadForDate(date) {
+                fetch(`/historical_data?date=${date}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(data.error);
+                            return;
+                        }
+
+                        // show sections
+                        statsSection.style.display = 'block';
+                        chartsSection.style.display = 'grid';
+                        document.getElementById('total-kwh').textContent = data.total_kwh;
+
+                        // create charts if not already created
+                        const ctxPower = document.getElementById('powerChart').getContext('2d');
+                        const ctxVoltage = document.getElementById('voltageChart').getContext('2d');
+                        const ctxCurrent = document.getElementById('currentChart').getContext('2d');
+
+                        if (!powerChart) {
+                            powerChart = createChart(ctxPower, 'Power (W)', 'rgb(46,204,113)');
+                            voltageChart = createChart(ctxVoltage, 'Voltage (V)', 'rgb(39,174,96)');
+                            currentChart = createChart(ctxCurrent, 'Current (A)', 'rgb(22,160,133)');
+                        }
+
+                        updateChart(powerChart, data.timestamps, data.power);
+                        updateChart(voltageChart, data.timestamps, data.voltage);
+                        updateChart(currentChart, data.timestamps, data.current);
+                    })
+                    .catch(err => {
+                        alert('Failed to load historical data: ' + err);
+                    });
+            }
+
+            // on click load
+            if (loadBtn) {
+                loadBtn.addEventListener('click', function() {
+                    const date = dateSelect.value;
+                    loadForDate(date);
+                });
+            }
+
+            // Auto-load the first date when page opens
+            if (dateSelect && dateSelect.options.length) {
+                // give the page a moment (in case CSS/DOM still rendering) then load
+                setTimeout(() => {
+                    loadForDate(dateSelect.value);
+                }, 200);
+            }
+
+            function createChart(ctx, label, color) {
+                return new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: label,
+                            data: [],
+                            borderColor: color,
+                            backgroundColor: color.replace(')', ',0.12)').replace('rgb','rgba'),
+                            borderWidth: 2,
+                            tension: 0.15,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: true } },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 12 } },
+                            y: { beginAtZero: false, grace: '5%' }
+                        }
+                    }
+                });
+            }
+
+            function updateChart(chart, labels, data) {
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = data;
+                chart.update();
+            }
+        });
+    </script>
+</body>
+</html>

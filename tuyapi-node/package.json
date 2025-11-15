@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "tuyapi": "^7.7.1"
+  }
+}
