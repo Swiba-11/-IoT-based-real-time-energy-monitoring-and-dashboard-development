@@ -83,7 +83,7 @@ def write_settings(s):
 # -----------------------------
 # Save energy data to JSON
 # -----------------------------
-def save_energy_data(dps):
+def save_energy_data(dps, room_name="Room1"):
     try:
         entry = {
             'timestamp': datetime.now().isoformat(),
@@ -98,21 +98,23 @@ def save_energy_data(dps):
 
         with file_lock:
             with open(JSON_FILE, 'r') as f:
-                existing_data = json.load(f)
+                all_data = json.load(f)
 
-            existing_data.append(entry)
+            if room_name not in all_data:
+                all_data[room_name] = []
+
+            all_data[room_name].append(entry)
 
             # Keep only last 30 days
             cutoff = datetime.now() - timedelta(days=30)
-            existing_data = [
-                e for e in existing_data
-                if parse_time(e['timestamp']) > cutoff
-            ]
+            for room in all_data:
+                all_data[room] = [e for e in all_data[room] if datetime.fromisoformat(e['timestamp']) > cutoff]
 
             with open(JSON_FILE, 'w') as f:
-                json.dump(existing_data, f)
+                json.dump(all_data, f)
     except Exception as e:
         print(f"Error saving data: {e}")
+
 
 # -----------------------------
 # Poll device every 8 seconds
@@ -310,48 +312,12 @@ def build_daily_summary(days_back=30):
 # -----------------------------
 @app.route('/')
 def index():
-    try:
-        with file_lock:
-            with open(JSON_FILE, 'r') as f:
-                all_data = json.load(f)
-    except Exception:
-        all_data = []
+    # List of rooms (you can adjust the names or add more rooms)
+    rooms = ["Room 1", "Room 2", "Room 3", "Room 4", "Room 5"]
 
-    settings = read_settings()
-    rate = float(settings.get('cost_per_kwh', 10.0))
+    # Render the building dashboard with clickable tiles for each room
+    return render_template('building_dashboard.html', rooms=rooms)
 
-    if all_data:
-        latest = all_data[-1]['data']
-        power_w = latest['power_w']
-        # instantaneous kW
-        kw = power_w / 1000.0
-        # instantaneous cost per hour at current power
-        cost_per_hour = round(kw * rate, 6)
-        cost_per_min = round(cost_per_hour / 60.0, 6)
-        # estimated daily cost if current power sustained 24h
-        est_daily_cost = round(cost_per_hour * 24.0, 4)
-
-        return render_template('dashboard.html',
-                               is_on=latest['is_on'],
-                               current_ma=latest['current_ma'],
-                               power_w=power_w,
-                               voltage_v=latest['voltage_v'],
-                               total_kwh=latest['total_kwh'],
-                               cost_per_kwh=rate,
-                               est_daily_cost=est_daily_cost,
-                               cost_per_min=cost_per_min,
-                               cost_per_hour=cost_per_hour)
-    # fallback
-    return render_template('dashboard.html',
-                           is_on=None,
-                           current_ma=0,
-                           power_w=0,
-                           voltage_v=0,
-                           total_kwh=0,
-                           cost_per_kwh=rate,
-                           est_daily_cost=0,
-                           cost_per_min=0,
-                           cost_per_hour=0)
 
 @app.route('/live_data')
 def live_data():
@@ -479,6 +445,70 @@ def set_rate():
 @app.route('/manual')
 def manual():
     return render_template('manual.html')
+
+@app.route('/building_dashboard')
+def building_dashboard():
+    try:
+        with file_lock:
+            with open(JSON_FILE, 'r') as f:
+                building_data = json.load(f)
+        rooms = list(building_data.keys())
+        room_status = {}
+        for room in rooms:
+            if building_data[room]:
+                room_status[room] = building_data[room][-1]['data']['is_on']
+            else:
+                room_status[room] = None
+        return render_template('building_dashboard.html', rooms=rooms, room_status=room_status)
+    except Exception as e:
+        print(f"Error loading building dashboard: {e}")
+        return render_template('building_dashboard.html', rooms=[], room_status={})
+    
+@app.route('/room/<room_name>')
+def room_dashboard(room_name):
+    try:
+        with file_lock:
+            with open(JSON_FILE, 'r') as f:
+                all_data = json.load(f)
+    except Exception:
+        all_data = []
+
+    settings = read_settings()
+    rate = float(settings.get('cost_per_kwh', 10.0))
+
+    if all_data:
+        latest = all_data[-1]['data']
+        power_w = latest['power_w']
+        # instantaneous kW
+        kw = power_w / 1000.0
+        # instantaneous cost per hour at current power
+        cost_per_hour = round(kw * rate, 6)
+        cost_per_min = round(cost_per_hour / 60.0, 6)
+        # estimated daily cost if current power sustained 24h
+        est_daily_cost = round(cost_per_hour * 24.0, 4)
+
+        return render_template('dashboard.html',
+                               is_on=latest['is_on'],
+                               current_ma=latest['current_ma'],
+                               power_w=power_w,
+                               voltage_v=latest['voltage_v'],
+                               total_kwh=latest['total_kwh'],
+                               cost_per_kwh=rate,
+                               est_daily_cost=est_daily_cost,
+                               cost_per_min=cost_per_min,
+                               cost_per_hour=cost_per_hour)
+    # fallback
+    return render_template('dashboard.html',
+                           is_on=None,
+                           current_ma=0,
+                           power_w=0,
+                           voltage_v=0,
+                           total_kwh=0,
+                           cost_per_kwh=rate,
+                           est_daily_cost=0,
+                           cost_per_min=0,
+                           cost_per_hour=0)
+
 
 @app.route('/on')
 def turn_on():
