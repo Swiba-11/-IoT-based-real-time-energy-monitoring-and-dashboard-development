@@ -9,7 +9,6 @@
 
     <!-- Modernized Styling + Layout Redesign -->
     <style>
-
         :root {
             --primary: #28a745; /* NEW GREEN HEADER */
             --secondary: #1f7a33;
@@ -177,6 +176,19 @@
             margin-bottom: 10px;
         }
 
+        /* Rate input */
+        .rate-box {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .rate-input {
+            width: 120px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            font-weight: 600;
+        }
     </style>
 </head>
 
@@ -200,18 +212,30 @@
 
         <!-- STATUS -->
         <div class="control-section">
-            <div class="status">
-                Status:
-                {% if is_on == None %}
-                    <span class="status-badge off">⚠ Offline</span>
-                {% elif is_on %}
-                    <span class="status-badge on">ON</span>
-                {% else %}
-                    <span class="status-badge off">OFF</span>
-                {% endif %}
+            <div>
+                <div class="status">
+                    Status:
+                    {% if is_on == None %}
+                        <span class="status-badge off">⚠ Offline</span>
+                    {% elif is_on %}
+                        <span class="status-badge on">ON</span>
+                    {% else %}
+                        <span class="status-badge off">OFF</span>
+                    {% endif %}
+                </div>
+
+                <div style="margin-top:10px; font-size:0.95rem;">
+                    Electricity rate:
+                    <span id="rate-display">{{ "%.2f"|format(cost_per_kwh) }}</span> per kWh
+                </div>
             </div>
 
             <div class="btn-group">
+                <div class="rate-box" style="margin-right:12px;">
+                    <input id="rate-input" class="rate-input" type="number" step="0.01" min="0" value="{{ cost_per_kwh }}">
+                    <button id="save-rate" class="btn" style="background:#0d6efd;color:#fff;border-radius:8px;">Save rate</button>
+                </div>
+
                 {% if is_on != None %}
                     {% if is_on %}
                         <a href="/off" class="btn btn-off">Turn OFF</a>
@@ -238,6 +262,17 @@
                 <div class="energy-label">Current</div>
                 <div class="energy-value" id="current-value">{{ "%.2f"|format(current_ma/1000) }}</div> A
             </div>
+
+            <div class="energy-card">
+                <div class="energy-label">Estimated Cost (24h)</div>
+                <div class="energy-value" id="est-daily-cost">{{ est_daily_cost }}</div>
+                <div style="font-size:0.9rem;color:#555;">(if current power sustained)</div>
+            </div>
+
+            <div class="energy-card">
+                <div class="energy-label">Instant cost / min</div>
+                <div class="energy-value" id="cost-per-min">{{ cost_per_min }}</div> <div style="font-size:0.9rem;color:#555;">per min</div>
+            </div>
         </div>
 
         <!-- CHARTS -->
@@ -258,9 +293,8 @@
 
     </div>
 
-    <!-- JAVASCRIPT (unchanged) -->
+    <!-- JAVASCRIPT -->
     <script>
-        /* EXACT JS YOU PROVIDED — UNCHANGED */
         document.addEventListener('DOMContentLoaded', function() {
             const powerCtx = document.getElementById('powerChart').getContext('2d');
             const voltageCtx = document.getElementById('voltageChart').getContext('2d');
@@ -300,9 +334,12 @@
                 fetch('/live_data')
                     .then(r => r.json())
                     .then(data => {
+                        if (data.error) return;
                         document.getElementById('power-value').textContent = data.power.toFixed(1);
                         document.getElementById('voltage-value').textContent = data.voltage.toFixed(1);
                         document.getElementById('current-value').textContent = (data.current/1000).toFixed(2);
+                        document.getElementById('est-daily-cost').textContent = ( (data.cost_per_hour*24).toFixed(4) );
+                        document.getElementById('cost-per-min').textContent = data.cost_per_min;
 
                         const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
                         updateChart(powerChart, now, data.power);
@@ -320,6 +357,36 @@
                 }
                 chart.update();
             }
+
+            // --- Rate saving ---
+            const rateInput = document.getElementById('rate-input');
+            const saveBtn = document.getElementById('save-rate');
+            const rateDisplay = document.getElementById('rate-display');
+
+            saveBtn.addEventListener('click', () => {
+                const v = parseFloat(rateInput.value);
+                if (isNaN(v) || v < 0) {
+                    alert('Please enter a valid non-negative rate per kWh.');
+                    return;
+                }
+                fetch('/set_rate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({rate: v})
+                })
+                .then(r => r.json())
+                .then(resp => {
+                    if (resp.success) {
+                        rateDisplay.textContent = resp.cost_per_kwh.toFixed(2);
+                        alert('Rate saved.');
+                    } else {
+                        alert('Failed to save rate.');
+                    }
+                })
+                .catch(err => {
+                    alert('Failed to save rate: ' + err);
+                });
+            });
         });
     </script>
 

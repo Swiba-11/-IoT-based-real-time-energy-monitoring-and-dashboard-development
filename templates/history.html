@@ -140,6 +140,21 @@
             font-size: 1.2rem;
         }
 
+        table.summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+        }
+        table.summary-table th, table.summary-table td {
+            border: 1px solid rgba(0,0,0,0.06);
+            padding: 8px 10px;
+            text-align: left;
+        }
+        table.summary-table th {
+            background: rgba(0,0,0,0.04);
+            font-weight: 700;
+        }
+
         @media (max-width: 768px) { body { padding: 18px; } }
     </style>
 </head>
@@ -153,6 +168,33 @@
         {% if not dates %}
             <div class="no-data">No historical data available</div>
         {% else %}
+            <!-- SUMMARY TABLE + TREND -->
+            <div id="daily-summary-section">
+                <h3>Last {{ 30 }} days — Daily Summary</h3>
+                <table class="summary-table" id="summary-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Total (kWh)</th>
+                            <th>Cost (per {{ cost_per_kwh }})</th>
+                            <th>Avg Power (W)</th>
+                            <th>Max (W)</th>
+                            <th>Min (W)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="summary-body">
+                        <tr><td colspan="6">Loading…</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="chart-card" style="height:260px;">
+                    <div class="chart-title">Daily kWh Trend</div>
+                    <canvas id="dailyKwhChart"></canvas>
+                </div>
+
+                <div style="height:18px;"></div>
+            </div>
+
             <div class="date-selector">
                 <select id="date-select" aria-label="Choose date">
                     {% for date in dates %}
@@ -194,6 +236,72 @@
             const chartsSection = document.getElementById('charts-section');
 
             let powerChart, voltageChart, currentChart;
+            let dailyKwhChart;
+
+            // load daily summary (last 30 days)
+            function loadDailySummary() {
+                fetch('/daily_summary?days=30')
+                    .then(r => r.json())
+                    .then(resp => {
+                        const data = resp.summary || [];
+                        const tbody = document.getElementById('summary-body');
+                        tbody.innerHTML = '';
+                        if (!data.length) {
+                            tbody.innerHTML = '<tr><td colspan="6">No data</td></tr>';
+                            return;
+                        }
+                        const labels = [];
+                        const kwhs = [];
+                        const costs = [];
+
+                        data.forEach(d => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `<td>${d.date}</td>
+                                            <td>${d.total_kwh}</td>
+                                            <td>${d.cost}</td>
+                                            <td>${d.avg_w}</td>
+                                            <td>${d.max_w}</td>
+                                            <td>${d.min_w}</td>`;
+                            tbody.appendChild(tr);
+
+                            labels.push(d.date);
+                            kwhs.push(d.total_kwh);
+                            costs.push(d.cost);
+                        });
+
+                        // create / update dailyKwhChart
+                        const ctx = document.getElementById('dailyKwhChart').getContext('2d');
+                        if (!dailyKwhChart) {
+                            dailyKwhChart = new Chart(ctx, {
+                                type: 'line',
+                                data: {
+                                    labels: labels,
+                                    datasets: [{
+                                        label: 'kWh',
+                                        data: kwhs,
+                                        borderColor: 'rgb(46,204,113)',
+                                        backgroundColor: 'rgba(46,204,113,0.12)',
+                                        tension: 0.15,
+                                        fill: true
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: { legend: { display: true } },
+                                    scales: { x: { grid: { display: false } }, y: { beginAtZero: true } }
+                                }
+                            });
+                        } else {
+                            dailyKwhChart.data.labels = labels;
+                            dailyKwhChart.data.datasets[0].data = kwhs;
+                            dailyKwhChart.update();
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to load daily summary', err);
+                    });
+            }
 
             // function to fetch & render for a date
             function loadForDate(date) {
@@ -240,11 +348,12 @@
 
             // Auto-load the first date when page opens
             if (dateSelect && dateSelect.options.length) {
-                // give the page a moment (in case CSS/DOM still rendering) then load
                 setTimeout(() => {
                     loadForDate(dateSelect.value);
                 }, 200);
             }
+
+            loadDailySummary();
 
             function createChart(ctx, label, color) {
                 return new Chart(ctx, {
